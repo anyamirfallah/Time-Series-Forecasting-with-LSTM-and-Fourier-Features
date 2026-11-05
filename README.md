@@ -2,223 +2,408 @@
 
 ## Overview
 
-This project implements an advanced time-series forecasting pipeline that combines **Long Short-Term Memory (LSTM) networks** with **Fourier-based seasonal features** to model temporal dependencies and recurring seasonal patterns.
+This project implements an advanced time-series forecasting pipeline that combines **Long Short-Term Memory (LSTM) neural networks** with **Fourier-based seasonal feature engineering**.
 
-The primary objective is to investigate whether incorporating Fourier harmonics into an LSTM architecture improves forecasting performance compared with conventional forecasting approaches.
+The objective is to investigate whether explicitly incorporating periodic information through Fourier harmonics can improve the forecasting performance of recurrent neural networks.
 
-The implementation uses a structured experimental framework involving multiple random seeds, Fourier feature ablation, rolling-origin validation, baseline comparisons, and final evaluation on an untouched test set.
+The pipeline integrates trend-residual decomposition, temporal feature engineering, multi-seed experiments, Fourier harmonic ablation, rolling-origin validation, baseline comparisons, and final evaluation on an untouched test set.
+
+The implementation is built with PyTorch and uses a structured experimental framework to investigate the contribution of seasonal representations to neural time-series forecasting.
 
 ## Key Features
 
-- **Logarithmic Transformation:** Applies a logarithmic transformation to stabilize the target series.
-- **Trend and Residual Decomposition:** Separates the linear trend from the residual component.
-- **Fourier Feature Engineering:** Generates sinusoidal and cosine features to capture periodic seasonal patterns.
-- **LSTM Architecture:** Uses a multi-layer LSTM network to learn temporal dependencies.
-- **Hyperparameter Ablation:** Evaluates different numbers of Fourier harmonics.
-- **Multi-Seed Experiments:** Repeats experiments across multiple random seeds to evaluate stability.
-- **Rolling-Origin Validation:** Evaluates model performance across multiple chronological validation windows.
-- **Baseline Comparisons:** Compares the proposed model against Seasonal Naive, Fourier Regression, and Vanilla LSTM.
-- **Residual Diagnostics:** Analyzes prediction errors and their autocorrelation.
-- **Model Checkpointing:** Saves the trained model and preprocessing parameters for future use.
+- **Logarithmic Transformation:** Stabilizes the target series through logarithmic scaling.
+- **Trend-Residual Decomposition:** Separates the estimated linear trend from the residual component.
+- **Fourier Feature Engineering:** Encodes periodic seasonal patterns using sine and cosine functions.
+- **Stacked LSTM Architecture:** Learns temporal dependencies through multiple recurrent layers.
+- **Fourier Harmonic Ablation:** Investigates the effect of different numbers of seasonal harmonics.
+- **Multi-Seed Experiments:** Evaluates model stability across different random initializations.
+- **Rolling-Origin Validation:** Tests forecasting consistency across multiple chronological validation windows.
+- **Baseline Comparisons:** Evaluates the proposed architecture against Seasonal Naive, Fourier Regression, and Vanilla LSTM.
+- **Residual Diagnostics:** Examines prediction errors and their autocorrelation.
+- **Model Checkpointing:** Saves trained weights, model configuration, and preprocessing parameters.
 
 ## Methodology
 
 ### 1. Data Preparation
 
-The pipeline loads monthly alcohol sales data from a CSV file.
+The pipeline uses monthly alcohol sales data.
 
-| Parameter          | Configuration      |
-| ------------------ | ------------------ |
-| Date column        | `observation_date` |
-| Target column      | `S4248SM144NCEN`   |
-| Target variable    | Alcohol sales      |
-| Sampling frequency | Monthly            |
-| Transformation     | Natural logarithm  |
+| Parameter | Configuration |
+|---|---|
+| Dataset | Alcohol Sales |
+| Date column | `observation_date` |
+| Target column | `S4248SM144NCEN` |
+| Target variable | Alcohol sales |
+| Sampling frequency | Monthly |
+| Transformation | Natural logarithm |
 
-The dataset is sorted chronologically, missing observations are removed, duplicate dates are eliminated, and non-positive target values are rejected.
+The preprocessing stage includes:
+
+- Converting dates into datetime format.
+- Converting target values into numeric format.
+- Removing missing observations.
+- Sorting observations chronologically.
+- Removing duplicate dates.
+- Checking for non-positive target values.
+
+The target series is transformed using:
+
+$$
+y_t^{\log} = \log(y_t)
+$$
 
 ### 2. Temporal Data Splitting
 
-The dataset is divided chronologically to prevent future observations from leaking into model training.
+The dataset is divided chronologically to preserve temporal ordering and avoid random train-test splitting.
 
-| Dataset    | Percentage |
-| ---------- | ---------: |
-| Training   |        70% |
-| Validation |        15% |
-| Testing    |        15% |
+| Dataset | Percentage |
+|---|---:|
+| Training | 70% |
+| Validation | 15% |
+| Testing | 15% |
 
-The test set remains untouched during model selection and hyperparameter experiments.
+The training set is used for parameter estimation and model optimization.
+
+The validation set is used for hyperparameter selection and early stopping.
+
+The test set remains untouched during model selection and is reserved for final performance evaluation.
 
 ### 3. Trend and Residual Decomposition
 
-The logarithmically transformed target is decomposed into a linear trend and a residual component:
+The logarithmically transformed target is decomposed into a linear trend and a residual component.
 
-[
-\log(y_t)=T_t+R_t
-]
+$$
+\log(y_t) = T_t + R_t
+$$
 
 Where:
 
-- (T_t): Estimated linear trend.
-- (R_t): Residual component.
+- $T_t$: Estimated linear trend.
+- $R_t$: Residual component.
 
-A linear regression trend is fitted using training observations. The residuals are standardized using `StandardScaler`, while the trend is normalized using training-derived minimum and maximum values.
+A linear trend is estimated using polynomial regression of degree one, fitted exclusively on the training observations.
+
+The residual component is calculated as:
+
+$$
+R_t = \log(y_t) - T_t
+$$
+
+The residuals are standardized using `StandardScaler`, fitted on the training data.
+
+The estimated trend is normalized using its training-derived minimum and maximum values.
+
+This decomposition allows the LSTM to focus on temporal fluctuations while retaining the underlying trend information as an additional feature.
 
 ### 4. Fourier Feature Engineering
 
 Fourier features are introduced to represent recurring seasonal patterns.
 
-For each harmonic (k):
+For each harmonic $k$, two periodic features are generated:
 
-[
-S_k(t)=\sin\left(\frac{2\pi kt}{P}\right)
-]
+**Sine component**
 
-[
-C_k(t)=\cos\left(\frac{2\pi kt}{P}\right)
-]
+$$
+S_k(t) = \sin\left(\frac{2\pi kt}{P}\right)
+$$
+
+**Cosine component**
+
+$$
+C_k(t) = \cos\left(\frac{2\pi kt}{P}\right)
+$$
 
 Where:
 
-- (P=12): Seasonal period corresponding to 12 months.
-- (K): Number of Fourier harmonics.
+- $t$: Temporal index.
+- $k$: Harmonic number.
+- $P$: Seasonal period, set to 12 months.
+- $K$: Total number of Fourier harmonics.
 
-The experiment evaluates:
+The number of harmonics is investigated using:
 
-[
-K\in{0,1,2,3,4,5}
-]
+$$
+K \in \{0,1,2,3,4,5\}
+$$
 
 Each harmonic contributes two additional input features.
 
-### 5. Feature Construction
+A configuration with $K=0$ represents a model without Fourier features and serves as the Vanilla LSTM configuration.
 
-The final input feature matrix combines:
+### 5. Feature Matrix Construction
+
+The final feature matrix combines three components:
 
 1. Standardized residuals.
-2. Fourier sine and cosine components.
+2. Fourier sine and cosine features.
 3. Normalized linear trend.
 
-The resulting feature vectors are organized into sliding temporal sequences.
+The resulting feature vector at each time step is:
 
-The lookback window is set to 36 observations, allowing the model to use the previous 36 months to predict the next observation.
+$$
+X_t =
+\left[
+\widetilde{R}_t,
+S_1(t),C_1(t),
+\ldots,
+S_K(t),C_K(t),
+\widetilde{T}_t
+\right]
+$$
 
-### 6. LSTM Architecture
+Where:
 
-The forecasting model consists of:
+- $\widetilde{R}_t$: Standardized residual.
+- $\widetilde{T}_t$: Normalized trend.
+- $S_k(t)$ and $C_k(t)$: Fourier features.
 
-- Two stacked LSTM layers.
-- Hidden dimension of 64.
-- Dropout regularization.
-- A fully connected regression head.
-- GELU activation.
-- A single output neuron.
+The total input dimensionality is:
 
-**Model configuration:**
+$$
+D = 2K + 2
+$$
 
-| Hyperparameter          |   Value |
-| ----------------------- | ------: |
-| Lookback window         |      36 |
-| Hidden size             |      64 |
-| LSTM layers             |       2 |
-| Dropout                 |    0.15 |
-| Batch size              |      32 |
-| Learning rate           |  0.0005 |
-| Weight decay            | 0.00001 |
-| Maximum epochs          |     150 |
-| Early stopping patience |      25 |
-| Optimizer               |   AdamW |
-| Loss function           |     MSE |
+### 6. Sequence Generation
 
-### 7. Experimental Design
+A sliding-window approach converts the feature matrix into temporal sequences.
 
-The project contains several experiments.
+The model uses a lookback window of 36 observations to predict the residual component at the next time step.
 
-**Experiment 1 — Baseline Evaluation**
+For each prediction:
 
-Evaluates:
+$$
+X_t =
+[X_{t-36},\ldots,X_{t-1}]
+$$
 
-- Seasonal Naive forecasting.
-- Fourier Linear Regression.
+The corresponding target is:
 
-**Experiment 2 — Fourier Ablation**
+$$
+\hat{R}_t = f(X_t)
+$$
 
-Trains the LSTM architecture using different Fourier configurations:
+This allows the network to learn temporal dependencies across the previous three years of observations.
 
-[
-K\in{0,1,2,3,4,5}
-]
+### 7. LSTM Architecture
+
+The forecasting model consists of two stacked LSTM layers followed by a fully connected regression head.
+
+**Architecture configuration:**
+
+| Component | Configuration |
+|---|---|
+| Input | Sequential multivariate features |
+| LSTM layers | 2 |
+| Hidden dimension | 64 |
+| LSTM dropout | 0.15 |
+| Fully connected layer | 64 → 32 |
+| Activation | GELU |
+| Dropout | 0.15 |
+| Output layer | 32 → 1 |
+| Prediction target | Standardized residual |
+
+The final hidden representation is extracted from the last time step and passed through the regression head to produce the next-step residual prediction.
+
+### 8. Training Configuration
+
+The model is optimized using AdamW with mean squared error as the training objective.
+
+| Hyperparameter | Value |
+|---|---:|
+| Lookback window | 36 |
+| Hidden size | 64 |
+| Number of LSTM layers | 2 |
+| Dropout | 0.15 |
+| Batch size | 32 |
+| Initial learning rate | 0.0005 |
+| Weight decay | 0.00001 |
+| Maximum epochs | 150 |
+| Early stopping patience | 25 |
+| Gradient clipping | 1.0 |
+| Optimizer | AdamW |
+| Loss function | MSE |
+| LR scheduler | ReduceLROnPlateau |
+
+The learning rate scheduler reduces the learning rate by a factor of 0.5 when validation loss stops improving, with a minimum learning rate of 0.00001.
+
+Gradient clipping is applied to stabilize optimization.
+
+Early stopping monitors validation loss and restores the model weights corresponding to the best validation performance.
+
+## Experimental Design
+
+The experimental framework consists of five main stages.
+
+### Experiment 1 — Baseline Evaluation
+
+Two conventional forecasting approaches are implemented.
+
+**Seasonal Naive**
+
+Uses the observation from the same month of the previous year:
+
+$$
+\hat{y}_t = y_{t-12}
+$$
+
+**Fourier Linear Regression**
+
+Uses a linear regression model with a temporal trend and Fourier seasonal features:
+
+$$
+\hat{z}_t =
+\beta_0 + \beta_1 t +
+\sum_{k=1}^{K}
+\left[
+a_k S_k(t) + b_k C_k(t)
+\right]
+$$
+
+Where $z_t = \log(y_t)$.
+
+The Fourier regression baseline is evaluated using different harmonic configurations:
+
+$$
+K \in \{0,1,2,3,4,5\}
+$$
+
+### Experiment 2 — Fourier Harmonic Ablation
+
+The LSTM architecture is trained using different Fourier configurations.
+
+$$
+K \in \{0,1,2,3,4,5\}
+$$
 
 Each configuration is evaluated using three random seeds:
 
-[
-\text{Seeds}={42,123,2026}
-]
+$$
+\text{Seeds} = \{42,123,2026\}
+$$
 
-The optimal number of harmonics is selected based on the lowest mean validation RMSE.
+This produces:
 
-**Experiment 3 — Rolling-Origin Validation**
+$$
+6 \times 3 = 18
+$$
 
-Performs three chronological validation folds to investigate the consistency of the selected architecture across different forecasting origins.
+independent training experiments.
 
-Each fold uses an expanding training window and a 12-observation validation horizon.
+For each experiment, the following metrics are recorded:
 
-**Experiment 4 — Final Model Training**
+- Validation RMSE.
+- Validation MAE.
+- Validation MAPE.
+- Best validation epoch.
+- Best validation loss.
 
-After selecting the optimal Fourier configuration, the final model is retrained using the combined training and validation data.
+The results are aggregated across random seeds using mean and standard deviation.
 
-The final training epoch count is determined using the median best epoch from the selected validation experiments.
+The optimal harmonic configuration is selected based on the lowest mean validation RMSE.
 
-**Experiment 5 — Final Test Evaluation**
+### Experiment 3 — Rolling-Origin Validation
 
-The final model is evaluated on the previously untouched test set.
+Rolling-origin validation is performed to investigate the temporal stability of the selected architecture.
+
+The selected Fourier configuration is evaluated across three chronological folds.
+
+The training window expands at each fold, while the validation horizon is set to 12 observations.
+
+The rolling origins are selected from approximately 60% to 80% of the development dataset.
+
+For each fold:
+
+1. A new preprocessing pipeline is fitted using the available training observations.
+2. A new LSTM model is initialized.
+3. The model is trained using the selected Fourier configuration.
+4. Early stopping determines the best training epoch.
+5. Predictions are generated for the corresponding validation horizon.
+6. RMSE, MAE, and MAPE are calculated.
+
+This experiment provides additional insight into forecasting performance across different temporal periods.
+
+### Experiment 4 — Final Model Training
+
+After selecting the optimal number of Fourier harmonics, the final model is retrained using the combined training and validation data.
+
+The final training epoch count is determined using the median best epoch across the three selected-hyperparameter experiments.
+
+The final model is trained with a fixed number of epochs rather than using the test set for early stopping.
+
+### Experiment 5 — Final Test Evaluation
+
+The final hybrid LSTM + Fourier model is evaluated on the untouched test set.
 
 Its performance is compared against:
 
 - Seasonal Naive.
-- Fourier Regression.
+- Fourier Linear Regression.
 - Vanilla LSTM.
 - Hybrid LSTM + Fourier.
 
+All final comparisons use the original sales scale rather than the standardized residual scale.
+
 ## Evaluation Metrics
 
-The implementation uses three regression metrics.
+Three regression metrics are used to evaluate forecasting performance.
 
 **Root Mean Squared Error (RMSE)**
 
-[
-RMSE=\sqrt{\frac{1}{N}\sum\_{i=1}^{N}(y_i-\hat y_i)^2}
-]
+$$
+RMSE =
+\sqrt{
+\frac{1}{N}
+\sum_{i=1}^{N}
+(y_i-\hat{y}_i)^2
+}
+$$
+
+RMSE penalizes larger prediction errors more heavily.
 
 **Mean Absolute Error (MAE)**
 
-[
-MAE=\frac{1}{N}\sum\_{i=1}^{N}|y_i-\hat y_i|
-]
+$$
+MAE =
+\frac{1}{N}
+\sum_{i=1}^{N}
+|y_i-\hat{y}_i|
+$$
+
+MAE measures the average absolute prediction error.
 
 **Mean Absolute Percentage Error (MAPE)**
 
-[
-MAPE=\frac{100}{N}\sum\_{i=1}^{N}
-\left|\frac{y_i-\hat y_i}{y_i}\right|
-]
+$$
+MAPE =
+\frac{100}{N}
+\sum_{i=1}^{N}
+\left|
+\frac{y_i-\hat{y}_i}{y_i}
+\right|
+$$
 
-Lower values indicate better forecasting performance.
+MAPE expresses prediction errors as percentages of actual observations.
+
+Lower values indicate better forecasting performance across all three metrics.
 
 ## Visualization and Diagnostics
 
-The notebook generates several visualizations:
+The notebook generates interactive visualizations using Plotly.
 
-- Original sales and logarithmically transformed sales.
+The visual analysis includes:
+
+- Original monthly alcohol sales.
+- Log-transformed sales.
 - Estimated linear trend.
 - Actual versus predicted test observations.
-- Training loss across epochs.
+- Final model training loss.
 - Fourier harmonic ablation results.
-- Prediction error over time.
+- Prediction errors over time.
 - Prediction error distribution.
 - Autocorrelation of test prediction errors.
 
-These visualizations help assess forecasting accuracy, model behavior, and remaining temporal structure in prediction errors.
+These visualizations help evaluate model convergence, forecasting accuracy, seasonal behavior, and remaining temporal structure in prediction errors.
 
 ## Installation and Requirements
 
@@ -229,73 +414,87 @@ pip install numpy pandas matplotlib scikit-learn
 pip install torch plotly tqdm jupyter
 ```
 
-Google Colab is supported.
+Google Colab is also supported.
 
 ## Dataset Setup
 
-Place the dataset in the working directory using the following filename:
+The notebook expects a CSV file named:
 
 ```text
 Alcohol sales.csv
 ```
 
-The notebook expects the following columns:
+The dataset must contain the following columns:
 
 ```text
 observation_date
 S4248SM144NCEN
 ```
 
-In Google Colab, upload the CSV file when prompted by the notebook.
+The notebook uses Google Colab's file upload interface to load the dataset.
 
 ## Running the Project
 
 1. Clone or download the repository.
 2. Install the required dependencies.
-3. Download and prepare the dataset.
-4. Place `Alcohol sales.csv` in the working directory.
+3. Download the alcohol sales dataset.
+4. Place `Alcohol sales.csv` in the working directory or upload it when prompted.
 5. Open `LSTMTASK.ipynb` in Jupyter Notebook or Google Colab.
-6. Execute the notebook sequentially.
-7. Review the experimental results, visualizations, and saved model checkpoint.
+6. Execute the notebook cells sequentially.
+7. Review the experimental results, evaluation metrics, and generated visualizations.
 
 ## Output Files
 
-The pipeline generates the following artifacts:
+The pipeline exports experimental results and the final trained model.
 
-| File                             | Description                                         |
-| -------------------------------- | --------------------------------------------------- |
-| `best_lstm_fourier_v2.pth`       | Final model checkpoint and preprocessing parameters |
-| `lstm_fourier_experiments.csv`   | Individual Fourier ablation experiment results      |
-| `fourier_ablation_summary.csv`   | Aggregated ablation statistics                      |
-| `baseline_validation_test.csv`   | Baseline validation and test results                |
-| `final_model_comparison.csv`     | Final test performance comparison                   |
-| `rolling_validation_results.csv` | Rolling-origin validation results                   |
+| File | Description |
+|---|---|
+| `best_lstm_fourier_v2.pth` | Final model checkpoint and preprocessing parameters |
+| `lstm_fourier_experiments.csv` | Individual Fourier ablation results |
+| `fourier_ablation_summary.csv` | Aggregated harmonic ablation statistics |
+| `baseline_validation_test.csv` | Baseline validation and test results |
+| `final_model_comparison.csv` | Final test performance comparison |
+| `rolling_validation_results.csv` | Rolling-origin validation results |
+
+The rolling validation CSV is generated when rolling-origin validation is enabled and produces valid folds.
 
 ## Reproducibility
 
 The implementation includes random seed control for Python, NumPy, and PyTorch.
 
-Experiments are conducted using multiple seeds, and deterministic PyTorch algorithms are enabled where supported.
+The experiments use the following random seeds:
+
+$$
+\{42,123,2026\}
+$$
+
+PyTorch deterministic algorithms are enabled where supported, and cuDNN benchmarking is disabled.
 
 The final checkpoint stores:
 
+- Model state dictionary.
 - Model architecture configuration.
-- Trained model weights.
 - Selected Fourier harmonic count.
+- Fourier seasonal period.
 - Lookback window.
-- Trend coefficients and normalization parameters.
+- Trend coefficients.
+- Trend normalization parameters.
 - Residual scaler parameters.
 - Final training epoch count.
-- Test evaluation metrics.
+- Random seed.
+- Feature ordering.
+- Final test metrics.
+
+This allows the trained model and its preprocessing configuration to be restored for subsequent inference.
 
 ## Research Objective
 
 The central research question is:
 
-**Can explicitly incorporating Fourier-based seasonal representations improve the forecasting performance and temporal modeling capabilities of LSTM networks?**
+**Can explicitly incorporating Fourier-based seasonal representations improve the forecasting performance of LSTM networks?**
 
-By comparing different harmonic configurations against conventional baselines and a Vanilla LSTM, this project investigates the contribution of explicit seasonal feature engineering to neural time-series forecasting.
+By systematically evaluating different harmonic configurations, comparing against conventional forecasting baselines, and investigating performance across multiple validation windows, this project examines the contribution of explicit seasonal feature engineering to neural time-series forecasting.
 
----
+## Technologies
 
-**Technologies:** Python · PyTorch · NumPy · Pandas · Scikit-learn · Plotly · Time-Series Forecasting · Deep Learning · LSTM · Fourier Analysis
+**Python · PyTorch · NumPy · Pandas · Scikit-learn · Plotly · Deep Learning · LSTM · Fourier Analysis · Time-Series Forecasting**
